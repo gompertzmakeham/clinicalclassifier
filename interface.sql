@@ -13,6 +13,12 @@ CREATE OR REPLACE PACKAGE clinicalclassifier AS
  *  example, classifications to be produced only at the end of the day, or the change in the
  *  patient. This is the simplest possible Mealy dependency as only the existence of an
  *  output depends on the transition, the actual values are transduced from the state.
+ *
+ *  This package is a working example that implements the toy model of:
+ *
+ *    susceptible -> new infection -> continued infection -> remission -> reinfection
+ *
+ *  The internal state counts infections based of an asborbing detector of positive assays.
  */
 
 	/*
@@ -22,9 +28,12 @@ CREATE OR REPLACE PACKAGE clinicalclassifier AS
 	TYPE inputobservation IS RECORD
 	(
 		uliabphn INTEGER,
-		observationdate DATE,
-		observationdescription VARCHAR2(1024),
-		observationresults INTEGER
+		assaydate DATE,
+		assayidentifier VARCHAR2(2),
+		assaydescription VARCHAR2(16),
+		assaycolonies INTEGER,
+		resultidentifier VARCHAR2(2),
+		resultdescription VARCHAR2(16)
 	);
 
 	/*
@@ -40,7 +49,7 @@ CREATE OR REPLACE PACKAGE clinicalclassifier AS
 	(
 		uliabphn INTEGER,
 		classificationdate DATE,
-		patientstate VARCHAR2(1024)
+		infectionstatus VARCHAR2(32)
 	);
 
 	/*
@@ -56,14 +65,9 @@ CREATE OR REPLACE PACKAGE clinicalclassifier AS
 	(
 		uliabphn INTEGER,
 		statedate DATE,
-		processedobservation INTEGER,
-		patientobservation INTEGER,
-		patientday INTEGER,
-		dayobservation INTEGER,
-		morbiditypresent INTEGER,
-		morbiditycount INTEGER,
-		symptompresent INTEGER,
-		symptomcount INTEGER
+		patientinfections INTEGER,
+		currentinfected INTEGER,
+		previousinfected INTEGER
 	);
 
 	/*

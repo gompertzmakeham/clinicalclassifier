@@ -13,6 +13,12 @@ CREATE OR REPLACE PACKAGE BODY clinicalclassifier AS
  *  example, classifications to be produced only at the end of the day, or the change in the
  *  patient. This is the simplest possible Mealy dependency as only the existence of an
  *  output depends on the transition, the actual values are transduced from the state.
+ *
+ *  This package is a working example that implements the toy model of:
+ *
+ *    susceptible -> new infection -> continued infection -> remission -> reinfection
+ *
+ *  The internal state counts infections based of an asborbing detector of positive assays.
  */
 
 	/*
@@ -22,14 +28,29 @@ CREATE OR REPLACE PACKAGE BODY clinicalclassifier AS
 	CURSOR generateobservation RETURN inputobservation IS
 	SELECT
 		1 uliabphn,
-		TRUNC(SYSDATE) observationdate,
-		'A' observationdescription,
-		1 observationresults
+		TRUNC(SYSDATE) assaydate,
+		'MC' assayidentifier,
+		'Microbial Culture' assaydescription,
+		0 assaycolonies,
+		'N' resultidentifier,
+		'Negative' resultdescription
+	FROM
+		dual a0
+	UNION ALL	
+	SELECT
+		1 uliabphn,
+		TRUNC(SYSDATE) assaydate,
+		'MC' assayidentifier,
+		'Microbial Culture' assaydescription,
+		1 assaycolonies,
+		'P' resultidentifier,
+		'Positive' resultdescription
 	FROM
 		dual a0
 	ORDER BY
 		1 ASC NULLS FIRST,
-		2 ASC NULLS FIRST;
+		2 ASC NULLS FIRST,
+		5 ASC NULLS FIRST;
 
 	/*
 	 *  Loop through the clinical observations as they occurred and update the state of the
@@ -64,14 +85,9 @@ CREATE OR REPLACE PACKAGE BODY clinicalclassifier AS
 		-- Minimal initialization, edit as necessary
 		nextstate.uliabphn := 0;
 		nextstate.statedate := TRUNC(SYSDATE);
-		nextstate.processedobservation := 0;
-		nextstate.patientobservation := 0;
-		nextstate.patientday := 0;
-		nextstate.dayobservation := 0;
-		nextstate.morbiditypresent := 0;
-		nextstate.morbiditycount := 0;
-		nextstate.symptompresent := 0;
-		nextstate.symptomcount := 0;
+		nextstate.patientinfections := 0;
+		nextstate.currentinfected := 0;
+		nextstate.previousinfected := 0;
 	
 		-- Send
 		RETURN nextstate;
@@ -93,32 +109,35 @@ CREATE OR REPLACE PACKAGE BODY clinicalclassifier AS
 
 		-- Propagate basic identifiers
 		nextstate.uliabphn := nextobservation.uliabphn;
-		nextstate.statedate := nextobservation.observationdate;
+		nextstate.statedate := nextobservation.assaydate;
 
 		-- Determine the type of action
 		CASE
 
-			-- Process new patient
+			-- Process new patient, resetting flags and counters
 			WHEN currentstate.uliabphn < nextobservation.uliabphn THEN
-				nextstate.dayobservation := 1;
-				nextstate.patientday := 1;
-				nextstate.patientobservation := 1;
-				nextstate.processedobservation := 1 + currentstate.processedobservation;
+				nextstate.patientinfections := 0;
+				nextstate.currentinfected := 0;
+				nextstate.previousinfected := 0;
 
-			-- Process new date for the same patient
-			WHEN currentstate.statedate < nextobservation.observationdate THEN
-				nextstate.dayobservation := 1;
-				nextstate.patientday := 1 + currentstate.patientday;
-				nextstate.patientobservation := 1 + currentstate.patientobservation;
-				nextstate.processedobservation := 1 + currentstate.processedobservation;
+			-- Process new date for the same patient, begin day by assuming negative assays
+			WHEN currentstate.statedate < nextobservation.assaydate THEN
+				nextstate.patientinfections := currentstate.patientinfections;
+				nextstate.currentinfected := 0;
+				nextstate.previousinfected := currentstate.currentinfected;
 
-			-- Process new observations for the same date and patient
+			-- Pull forward observations for the same date and patient
 			ELSE
-				nextstate.dayobservation := 1 + currentstate.dayobservation;
-				nextstate.patientday := currentstate.patientday;
-				nextstate.patientobservation := 1 + currentstate.patientobservation;
-				nextstate.processedobservation := 1 + currentstate.processedobservation;
+				nextstate.patientinfections := currentstate.patientinfections;
+				nextstate.currentinfected := currentstate.currentinfected;
+				nextstate.previousinfected := currentstate.previousinfected;
 		END CASE;
+
+		-- Update infection status on first positive test of the day
+		IF nextobservation.assaycolonies > 0 AND nextstate.currentinfected < 1 THEN
+			nextstate.patientinfections := 1 + nextstate.patientinfections;
+			nextstate.currentinfected := 1;
+		END IF;
 
 		-- Send
 		RETURN nextstate;
@@ -148,7 +167,7 @@ CREATE OR REPLACE PACKAGE BODY clinicalclassifier AS
 				RETURN TRUE;
 
 			-- Incoming new day, produce classification for current day
-			WHEN currentstate.statedate < nextobservation.observationdate THEN
+			WHEN currentstate.statedate < nextobservation.assaydate THEN
 				RETURN TRUE;
 
 			-- Do not produce classification for the same date and patient
@@ -172,6 +191,28 @@ CREATE OR REPLACE PACKAGE BODY clinicalclassifier AS
 		-- To do add transformation logic, example always producing a final record
 		returnclassification.uliabphn := currentstate.uliabphn;
 		returnclassification.classificationdate := currentstate.statedate;
+		CASE
+
+			-- Never been infected
+			WHEN currentstate.patientinfections < 1 THEN
+				returnclassification.infectionstatus := 'Susceptible';
+
+			-- Remission of infection
+			WHEN currentstate.currentinfected = 0 THEN
+				returnclassification.infectionstatus := 'Remission';
+
+			-- Continued infection
+			WHEN currentstate.previousinfected = 1 THEN
+				returnclassification.infectionstatus := 'Continued infection';
+
+			-- First infection
+			WHEN currentstate.patientinfections = 1 THEN
+				returnclassification.infectionstatus := 'New infection';
+			
+			-- Reinfections
+			ELSE
+				returnclassification.infectionstatus := 'Reinfection';
+		END CASE;
 		RETURN returnclassification;
 	END transduceclassification;
 END clinicalclassifier;
