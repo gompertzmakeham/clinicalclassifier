@@ -1,4 +1,4 @@
-CREATE OR REPLACE PACKAGE clinicalclassifier AS
+CREATE OR REPLACE PACKAGE syphilisclassifier AS
 /*
  *  Stub package outlining the meta-framework for implementing clinical classification
  *  algorithms as Mealy finite state transducer. The theory behind this implementation is
@@ -29,11 +29,11 @@ CREATE OR REPLACE PACKAGE clinicalclassifier AS
 	(
 		uliabphn INTEGER,
 		assaydate DATE,
-		assayidentifier VARCHAR2(2),
-		assaydescription VARCHAR2(16),
-		assaycolonies INTEGER,
-		resultidentifier VARCHAR2(2),
-		resultdescription VARCHAR2(16)
+		assayidentifier VARCHAR2(50),
+    assaydescription VARCHAR2(150),
+		resultdescription VARCHAR2(50),
+    assayorder INTEGER,
+    assayresult INTEGER
 	);
 
 	/*
@@ -49,6 +49,7 @@ CREATE OR REPLACE PACKAGE clinicalclassifier AS
 	(
 		uliabphn INTEGER,
 		classificationdate DATE,
+    infectioncount INTEGER,
 		infectionstatus VARCHAR2(32)
 	);
 
@@ -67,7 +68,12 @@ CREATE OR REPLACE PACKAGE clinicalclassifier AS
 		statedate DATE,
 		patientinfections INTEGER,
 		currentinfected INTEGER,
-		previousinfected INTEGER
+		previousinfected INTEGER,
+    currentdilution INTEGER,
+    previousdilution INTEGER,
+    EIAtrigger INTEGER,
+    TPPAtrigger INTEGER,
+    RPRtrigger INTEGER
 	);
 
 	/*
@@ -125,4 +131,4 @@ CREATE OR REPLACE PACKAGE clinicalclassifier AS
 		currentstate internalstate
 	)
 	RETURN outputclassification;
-END clinicalclassifier;
+END syphilisclassifier;

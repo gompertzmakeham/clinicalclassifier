@@ -1,4 +1,4 @@
-CREATE OR REPLACE PACKAGE BODY clinicalclassifier AS
+CREATE OR REPLACE PACKAGE BODY syphilisclassifier AS
 /*
  *  Stub package outlining the meta-framework for implementing clinical classification
  *  algorithms as Mealy finite state transducer. The theory behind this implementation is
@@ -27,30 +27,42 @@ CREATE OR REPLACE PACKAGE BODY clinicalclassifier AS
 	 */
 	CURSOR generateobservation RETURN inputobservation IS
 	SELECT
-		1 uliabphn,
-		TRUNC(SYSDATE) assaydate,
-		'MC' assayidentifier,
-		'Microbial Culture' assaydescription,
-		0 assaycolonies,
-		'N' resultidentifier,
-		'Negative' resultdescription
+		a0.phn_numeric uliabphn,
+		TRUNC(TO_DATE(a0.collect_date, 'MM/DD/YYYY HH24:MI')) assaydate,
+		a0.ordered_test assayidentifier,
+		a0.result_test assaydescription,
+    a0.result resultdescription,
+    CASE a0.ordered_test 
+      WHEN 'SYPH' THEN
+        1 
+      WHEN 'SYPH PROV' THEN
+        2
+      WHEN '.TPPA' THEN
+        3
+      WHEN '.RPR' THEN
+        4
+      ELSE
+        0
+    END assayorder,
+    CASE
+      WHEN a0.result = 'Reactive' THEN
+        1
+      WHEN a0.result = 'POSITIVE' THEN
+        1
+      WHEN a0.result LIKE '%Dil%' THEN
+        COALESCE(to_number(regexp_substr(a0.result, '[0-9]*')), 0)
+      ELSE
+        0
+    END assayresult
 	FROM
-		dual a0
-	UNION ALL	
-	SELECT
-		1 uliabphn,
-		TRUNC(SYSDATE) assaydate,
-		'MC' assayidentifier,
-		'Microbial Culture' assaydescription,
-		1 assaycolonies,
-		'P' resultidentifier,
-		'Positive' resultdescription
-	FROM
-		dual a0
+		lab_testing_prep a0
+  WHERE
+    a0.ordered_test IN ('SYPH', 'SYPH PROV', '.TPPA', '.RPR')
 	ORDER BY
 		1 ASC NULLS FIRST,
 		2 ASC NULLS FIRST,
-		5 ASC NULLS FIRST;
+    6 ASC NULLS FIRST,
+    7 ASC NULLS FIRST;
 
 	/*
 	 *  Loop through the clinical observations as they occurred and update the state of the
@@ -88,7 +100,12 @@ CREATE OR REPLACE PACKAGE BODY clinicalclassifier AS
 		nextstate.patientinfections := 0;
 		nextstate.currentinfected := 0;
 		nextstate.previousinfected := 0;
-	
+    nextstate.currentdilution := 0;
+    nextstate.previousdilution := 0;
+    nextstate.EIAtrigger := 0;
+    nextstate.TPPAtrigger := 0;
+    nextstate.RPRtrigger := 0;
+  
 		-- Send
 		RETURN nextstate;
 	END producestate;
@@ -119,25 +136,104 @@ CREATE OR REPLACE PACKAGE BODY clinicalclassifier AS
 				nextstate.patientinfections := 0;
 				nextstate.currentinfected := 0;
 				nextstate.previousinfected := 0;
+        nextstate.currentdilution := 0;
+        nextstate.previousdilution := 0;
+        nextstate.EIAtrigger := 0;
+        nextstate.TPPAtrigger := 0;
+        nextstate.RPRtrigger := 0;
 
 			-- Process new date for the same patient, begin day by assuming negative assays
 			WHEN currentstate.statedate < nextobservation.assaydate THEN
 				nextstate.patientinfections := currentstate.patientinfections;
 				nextstate.currentinfected := 0;
 				nextstate.previousinfected := currentstate.currentinfected;
+        nextstate.currentdilution := 0;
+        nextstate.previousdilution := currentstate.currentdilution;
+        nextstate.EIAtrigger := 0;
+        nextstate.TPPAtrigger := 0;
+        nextstate.RPRtrigger := 0;
 
 			-- Pull forward observations for the same date and patient
 			ELSE
 				nextstate.patientinfections := currentstate.patientinfections;
 				nextstate.currentinfected := currentstate.currentinfected;
 				nextstate.previousinfected := currentstate.previousinfected;
+        nextstate.currentdilution := currentstate.currentdilution;
+        nextstate.previousdilution := currentstate.previousdilution;
+        nextstate.EIAtrigger := currentstate.EIAtrigger;
+        nextstate.TPPAtrigger := currentstate.TPPAtrigger;
+        nextstate.RPRtrigger := currentstate.RPRtrigger;
 		END CASE;
 
-		-- Update infection status on first positive test of the day
-		IF nextobservation.assaycolonies > 0 AND nextstate.currentinfected < 1 THEN
-			nextstate.patientinfections := 1 + nextstate.patientinfections;
-			nextstate.currentinfected := 1;
-		END IF;
+    -- Toggle the triggers on the tests
+    CASE
+    
+      -- Trigger the EIA reactive flag
+      WHEN nextobservation.assayidentifier = 'SYPH' AND nextobservation.assayresult = 1 THEN
+        nextstate.EIAtrigger := 1;
+    
+      -- Trigger the EIA reactive flag
+      WHEN nextobservation.assayidentifier = 'SYPH PROV' AND nextobservation.assayresult = 1 THEN
+        nextstate.EIAtrigger := 1;
+        
+      -- Trigger the TPPA reactive flag
+      WHEN nextobservation.assayidentifier = '.TPPA' AND nextobservation.assayresult = 1 THEN
+        nextstate.TPPAtrigger := 1;
+        
+      --Assign the largest RPR dilution observed so far on the day
+      WHEN nextobservation.assayidentifier = '.RPR' THEN
+        nextstate.currentdilution := greatest(nextstate.currentdilution, nextobservation.assayresult);
+        
+      -- No op
+      ELSE
+        NULL;
+    END CASE;
+
+    -- Trigger the RPR by the dilution numbers
+    CASE
+    
+      -- Previous (from before) RPR and next (right now) are non-reactive or not reactive enough
+      WHEN nextstate.currentdilution < 2 THEN
+        nextstate.RPRtrigger := 0;
+        
+      -- Previous non-reactive, and next is reactive with at least 2 dilutions
+      WHEN nextstate.previousdilution = 0 THEN
+        nextstate.RPRtrigger := 1;
+        
+      -- Four fold increase in dilution number
+      WHEN 4 * currentstate.previousdilution <= nextstate.currentdilution THEN
+        nextstate.RPRtrigger := 1;
+      
+      -- Insufficient increase
+      ELSE
+        nextstate.RPRtrigger := 0;
+    END CASE;      
+    
+    -- Determine infections status
+    CASE
+    
+      -- EIA and TPPA triggered
+      WHEN nextstate.currentinfected = 0 AND nextstate.previousinfected = 0 AND nextstate.EIAtrigger = 1 AND nextstate.TPPAtrigger = 1 THEN
+        nextstate.currentinfected := 1;
+        nextstate.patientinfections := 1 + nextstate.patientinfections;
+    
+      -- EIA and TPPA triggered
+      WHEN nextstate.EIAtrigger = 1 AND nextstate.TPPAtrigger = 1 THEN
+        nextstate.currentinfected := 1;
+  
+      -- EIA and RPR triggered
+      WHEN nextstate.currentinfected = 0 AND nextstate.previousinfected = 0 AND nextstate.EIAtrigger = 1 AND nextstate.RPRtrigger = 1 THEN
+        nextstate.currentinfected := 1;
+        nextstate.patientinfections := 1 + nextstate.patientinfections;
+  
+      -- EIA and RPR triggered
+      WHEN nextstate.EIAtrigger = 1 AND nextstate.RPRtrigger = 1 THEN
+        nextstate.currentinfected := 1;
+  
+      -- No op
+      ELSE
+        NULL;
+    END CASE;
 
 		-- Send
 		RETURN nextstate;
@@ -191,7 +287,8 @@ CREATE OR REPLACE PACKAGE BODY clinicalclassifier AS
 		-- To do add transformation logic, example always producing a final record
 		returnclassification.uliabphn := currentstate.uliabphn;
 		returnclassification.classificationdate := currentstate.statedate;
-		CASE
+    returnclassification.infectioncount := currentstate.patientinfections;
+		CASE    
 
 			-- Never been infected
 			WHEN currentstate.patientinfections < 1 THEN
@@ -215,4 +312,4 @@ CREATE OR REPLACE PACKAGE BODY clinicalclassifier AS
 		END CASE;
 		RETURN returnclassification;
 	END transduceclassification;
-END clinicalclassifier;
+END syphilisclassifier;
