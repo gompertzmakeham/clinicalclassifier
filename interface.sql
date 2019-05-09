@@ -49,7 +49,7 @@ CREATE OR REPLACE PACKAGE syphilisclassifier AS
 	(
 		uliabphn INTEGER,
 		classificationdate DATE,
-    infectioncount INTEGER,
+		infectioncount INTEGER,
 		infectionstatus VARCHAR2(32)
 	);
 
