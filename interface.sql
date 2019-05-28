@@ -30,10 +30,10 @@ CREATE OR REPLACE PACKAGE syphilisclassifier AS
 		uliabphn INTEGER,
 		assaydate DATE,
 		assayidentifier VARCHAR2(16),
-    assaydescription VARCHAR2(64),
+		assaydescription VARCHAR2(64),
 		resultdescription VARCHAR2(64),
-    assayorder VARCHAR2(16),
-    assayresult INTEGER
+		assayorder VARCHAR2(16),
+		assayresult INTEGER
 	);
 
 	/*
@@ -49,7 +49,7 @@ CREATE OR REPLACE PACKAGE syphilisclassifier AS
 	(
 		uliabphn INTEGER,
 		classificationdate DATE,
-    infectioncount INTEGER,
+		infectioncount INTEGER,
 		infectionstatus VARCHAR2(32)
 	);
 
@@ -69,11 +69,11 @@ CREATE OR REPLACE PACKAGE syphilisclassifier AS
 		patientinfections INTEGER,
 		currentinfected INTEGER,
 		previousinfected INTEGER,
-    currentdilution INTEGER,
-    previousdilution INTEGER,
-    EIAtrigger INTEGER,
-    TPPAtrigger INTEGER,
-    RPRtrigger INTEGER
+		currentdilution INTEGER,
+		previousdilution INTEGER,
+		EIAtrigger INTEGER,
+		TPPAtrigger INTEGER,
+		RPRtrigger INTEGER
 	);
 
 	/*
